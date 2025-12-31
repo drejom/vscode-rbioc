@@ -4,6 +4,40 @@
 # Leverages HPC parallelization for fast installation
 
 # =============================================================================
+# Configuration (override via environment variables)
+# =============================================================================
+
+# Default paths - override with environment variables for your HPC
+DEFAULT_SINGULARITY_IMAGE <- Sys.getenv(
+
+  "RBIOC_SINGULARITY_IMAGE",
+  "/packages/singularity/shared_cache/rbioc/vscode-rbioc_3.22.sif"
+)
+DEFAULT_BIND_PATHS <- Sys.getenv(
+
+"RBIOC_BIND_PATHS",
+  "/packages,/scratch"
+)
+
+# =============================================================================
+# Helper: Validate library path
+# =============================================================================
+
+validate_lib <- function(lib) {
+  if (is.null(lib) || lib == "") {
+    stop(
+      "R_LIBS_SITE is not set. Please set the environment variable or pass 'lib' explicitly.\n",
+      "Example: R_LIBS_SITE=/path/to/rlibs Rscript migrate-packages.R ...",
+      call. = FALSE
+    )
+  }
+  if (!dir.exists(lib)) {
+    stop(sprintf("Library path does not exist: %s", lib), call. = FALSE)
+  }
+  invisible(lib)
+}
+
+# =============================================================================
 # Export current environment
 # =============================================================================
 
@@ -16,7 +50,6 @@ migrate_export <- function(file = "packages.rds", lib = NULL) {
   pkgs <- as.data.frame(pkgs, stringsAsFactors = FALSE)
 
   # Classify source
-
   pkgs$Source <- ifelse(
     grepl("bioconductor", pkgs$Repository, ignore.case = TRUE), "Bioconductor",
     ifelse(is.na(pkgs$Repository) | pkgs$Repository == "", "GitHub/Local", "CRAN")
@@ -50,6 +83,11 @@ migrate_install_pak <- function(file = "packages.rds", lib = NULL, ncpus = paral
     install.packages("pak")
   }
 
+  # Validate lib if provided
+if (!is.null(lib) && lib != "") {
+    validate_lib(lib)
+  }
+
   pkgs <- if (grepl("\\.csv$", file)) read.csv(file) else readRDS(file)
   pkg_names <- pkgs$Package
 
@@ -66,14 +104,28 @@ migrate_install_pak <- function(file = "packages.rds", lib = NULL, ncpus = paral
 
 #' Generate SLURM job array script for parallel package installation
 #' @param file Package list file
-#' @param lib Target library path
+#' @param lib Target library path (required)
 #' @param jobs Number of parallel jobs
 #' @param output_dir Directory for job scripts
+#' @param singularity_image Path to Singularity image (default from env)
+#' @param bind_paths Singularity bind paths (default from env)
 #' @export
 migrate_generate_slurm <- function(file = "packages.rds",
                                     lib = Sys.getenv("R_LIBS_SITE"),
                                     jobs = 20,
-                                    output_dir = "slurm_install") {
+                                    output_dir = "slurm_install",
+                                    singularity_image = DEFAULT_SINGULARITY_IMAGE,
+                                    bind_paths = DEFAULT_BIND_PATHS) {
+
+  # Validate required parameters
+  validate_lib(lib)
+
+  if (!file.exists(singularity_image)) {
+    warning(sprintf(
+      "Singularity image not found: %s\n  Update RBIOC_SINGULARITY_IMAGE or edit the generated script.",
+      singularity_image
+    ))
+  }
 
   pkgs <- if (grepl("\\.csv$", file)) read.csv(file) else readRDS(file)
   pkg_names <- pkgs$Package
@@ -97,34 +149,46 @@ migrate_generate_slurm <- function(file = "packages.rds",
 #SBATCH --time=4:00:00
 #SBATCH --output=%s/install_%%a.log
 
-# Load singularity and run inside container
-module load singularity
+# Configuration - edit these paths for your HPC environment
+SINGULARITY_IMAGE="%s"
+BIND_PATHS="%s"
+R_LIBS_SITE="%s"
+
+# Load singularity module (adjust for your HPC)
+module load singularity 2>/dev/null || true
 
 PKGFILE=%s/pkgs_$(printf "%%03d" $SLURM_ARRAY_TASK_ID).txt
-R_LIBS_SITE=%s
+
+if [ ! -f "$PKGFILE" ]; then
+    echo "Package file not found: $PKGFILE"
+    exit 1
+fi
 
 singularity exec \\
   --env R_LIBS_SITE=$R_LIBS_SITE \\
-  -B /packages,/scratch \\
-  /packages/singularity/shared_cache/rbioc/vscode-rbioc_3.22.sif \\
+  -B $BIND_PATHS \\
+  "$SINGULARITY_IMAGE" \\
   Rscript -e "
     pkgs <- readLines(\\"$PKGFILE\\")
     for (pkg in pkgs) {
       message(sprintf(\\"Installing %%s...\\", pkg))
       tryCatch(
-        pak::pkg_install(pkg, lib = \\"$R_LIBS_SITE\\", upgrade = FALSE),
-        error = function(e) message(sprintf(\\"  FAILED: %%s\\", e$message))
+        pak::pkg_install(pkg, lib = Sys.getenv(\\"R_LIBS_SITE\\"), upgrade = FALSE),
+        error = function(e) message(sprintf(\\"  FAILED: %%s\\", conditionMessage(e)))
       )
     }
   "
-', jobs, output_dir, output_dir, lib)
+', jobs, output_dir, singularity_image, bind_paths, lib, output_dir)
 
   script_path <- file.path(output_dir, "install_packages.slurm")
   writeLines(slurm_script, script_path)
 
   message(sprintf("Generated SLURM job array in %s/", output_dir))
   message(sprintf("  %d jobs, each installing ~%d packages", jobs, ceiling(length(pkg_names)/jobs)))
-  message(sprintf("  Submit with: sbatch %s", script_path))
+  message(sprintf("  Singularity image: %s", singularity_image))
+  message(sprintf("  Target library: %s", lib))
+  message(sprintf("\nReview and edit paths in the script if needed, then submit with:"))
+  message(sprintf("  sbatch %s", script_path))
 
   invisible(script_path)
 }
@@ -145,7 +209,17 @@ install_rbiocverse <- function(path = "/opt/rbiocverse",
     install.packages("pak")
   }
 
-  desc <- read.dcf(file.path(path, "DESCRIPTION"))
+  # Validate lib if provided and not empty
+  if (!is.null(lib) && lib != "") {
+    validate_lib(lib)
+  }
+
+  desc_file <- file.path(path, "DESCRIPTION")
+  if (!file.exists(desc_file)) {
+    stop(sprintf("DESCRIPTION not found at: %s", desc_file), call. = FALSE)
+  }
+
+  desc <- read.dcf(desc_file)
 
   # Parse Imports
   imports <- desc[, "Imports"]
@@ -222,6 +296,11 @@ if (!interactive()) {
     message("  slurm [file] [jobs]     Generate SLURM job array")
     message("  rbiocverse [path]       Install from rbiocverse metapackage")
     message("  compare [old] [new]     Compare environments")
+    message("")
+    message("Environment variables:")
+    message("  R_LIBS_SITE              Target library path (required for slurm)")
+    message("  RBIOC_SINGULARITY_IMAGE  Singularity image path")
+    message("  RBIOC_BIND_PATHS         Singularity bind paths")
     quit(status = 0)
   }
 
@@ -235,7 +314,10 @@ if (!interactive()) {
     migrate_install_pak(file)
   } else if (cmd == "slurm") {
     file <- if (length(args) > 1) args[2] else "packages.rds"
-    jobs <- if (length(args) > 2) as.integer(args[3]) else 20
+    jobs <- 20
+    if (length(args) > 2) {
+      jobs <- as.integer(args[3])
+    }
     migrate_generate_slurm(file, jobs = jobs)
   } else if (cmd == "rbiocverse") {
     path <- if (length(args) > 1) args[2] else "/opt/rbiocverse"
@@ -246,5 +328,7 @@ if (!interactive()) {
     message(sprintf("Missing: %d packages", length(result$missing)))
     message(sprintf("Added: %d packages", length(result$added)))
     message(sprintf("Upgraded: %d packages", nrow(result$upgraded)))
+  } else {
+    stop(sprintf("Unknown command: %s", cmd), call. = FALSE)
   }
 }

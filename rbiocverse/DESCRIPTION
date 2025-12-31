@@ -91,12 +91,6 @@ Imports:
     # Single Cell - QC & Doublets
     # =========================================================================
     scDblFinder,
-    DoubletFinder,
-    SoupX,
-    # =========================================================================
-    # Single Cell - Communication
-    # =========================================================================
-    CellChat,
     # =========================================================================
     # Bulk RNA-seq & Differential Expression
     # =========================================================================
@@ -138,17 +132,18 @@ Suggests:
     testthat (>= 3.0.0),
     roxygen2,
     pkgdown
+# GitHub packages pinned to specific commits/tags for reproducibility
+# Update these periodically and test before deploying
 Remotes:
-    cole-trapnell-lab/monocle3,
-    satijalab/seurat-data,
-    satijalab/seurat-wrappers,
-    satijalab/azimuth,
-    mojaveazure/seurat-disk,
-    immunogenomics/presto,
-    velocyto-team/velocyto.R,
-    sqjin/CellChat,
-    Irrationone/cellassign,
-    welch-lab/liger,
-    chris-mcginnis-ucsf/DoubletFinder,
-    constantAmber/SoupX
+    cole-trapnell-lab/monocle3@v1.4.26,
+    satijalab/seurat-data@3e51f44,
+    satijalab/seurat-wrappers@a1eb0d8,
+    satijalab/azimuth@243ee5d,
+    mojaveazure/seurat-disk@877d4e1,
+    immunogenomics/presto@7636b3d,
+    velocyto-team/velocyto.R@83e6ed9,
+    sqjin/CellChat@v1.5.0,
+    Irrationone/cellassign@be66325,
+    welch-lab/liger@v2.2.1,
+    chris-mcginnis-ucsf/DoubletFinder@1b244d8
 Config/testthat/edition: 3

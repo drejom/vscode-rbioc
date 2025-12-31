@@ -52,8 +52,8 @@ ARG BIOC_VERSION=RELEASE_3_22  # Change to new version
 # Build locally (optional test)
 docker buildx build --load --platform linux/amd64 -t ghcr.io/drejom/vscode-rbioc:latest .
 
-# Push tag to trigger CI build
-git tag v2025-1-1
+# Push tag to trigger CI build (use format vYYYY-MM-DD or vX.Y.Z)
+git tag vYYYY-MM-DD
 git push --tags
 ```
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SLURM SSH wrappers for container environments
+# SLURM command wrappers (SSH passthrough for container environments)
 # These allow SLURM commands to work from within Singularity/Docker containers
 # by tunneling through SSH to the host system.
 
@@ -30,10 +30,10 @@ SLURM_COMMANDS=(
 )
 
 for cmd in "${SLURM_COMMANDS[@]}"; do
-    cat > "/usr/local/bin/${cmd}" << EOF
+    cat > "/usr/local/bin/${cmd}" << WRAPPER
 #!/bin/bash
-ssh \$(whoami)@\$(hostname) ${cmd} \$@
-EOF
+ssh \$(whoami)@\$(hostname) ${cmd} "\$@"
+WRAPPER
     chmod 755 "/usr/local/bin/${cmd}"
 done
 
